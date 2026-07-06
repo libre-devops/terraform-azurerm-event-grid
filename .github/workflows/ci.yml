@@ -89,7 +89,7 @@ jobs:
         uses: libre-devops/terraform-azure@v1
         with:
           terraform-code-location: examples
-          terraform-stack-to-run-json: '["minimal","complete"]'
+          terraform-stack-to-run-json: '["minimal","complete","private"]'
           run-terraform-plan: true
           run-terraform-apply: true
           arm-client-id: ${{ vars.AZURE_CLIENT_ID }}
@@ -105,7 +105,7 @@ jobs:
         uses: libre-devops/terraform-azure@v1
         with:
           terraform-code-location: examples
-          terraform-stack-to-run-json: '["minimal","complete"]'
+          terraform-stack-to-run-json: '["minimal","complete","private"]'
           run-terraform-plan: false
           run-terraform-plan-destroy: true
           run-terraform-destroy: true
