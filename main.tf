@@ -23,6 +23,19 @@ locals {
     for k, s in var.event_subscriptions : k => s if s.system_topic != null
   }
 
+  delivery_role_assignments = {
+    for pair in flatten([
+      for sub_name, sub in var.event_subscriptions : [
+        for idx, ra in sub.delivery_identity_role_assignments : {
+          key      = "${sub_name}/${idx}"
+          sub_name = sub_name
+          sub      = sub
+          ra       = ra
+        }
+      ]
+    ]) : pair.key => pair
+  }
+
   scoped_subscriptions = {
     for k, s in var.event_subscriptions : k => merge(s, {
       resolved_scope = (
@@ -150,8 +163,35 @@ resource "azurerm_eventgrid_domain_topic" "this" {
   name = each.value.t_name
 }
 
+
+# Delivery permission must exist BEFORE the subscription: Event Grid validates the delivery
+# identity against the destination at create time (proven live: Managed Identity Authorization
+# Error). The principal is the module-managed source's identity; the settle absorbs RBAC
+# propagation before Event Grid checks.
+resource "azurerm_role_assignment" "delivery" {
+  for_each = local.delivery_role_assignments
+
+  scope                = each.value.ra.scope
+  role_definition_name = each.value.ra.role_definition_name
+  principal_id = (
+    each.value.sub.system_topic != null ? azurerm_eventgrid_system_topic.this[each.value.sub.system_topic].identity[0].principal_id :
+    each.value.sub.topic != null ? azurerm_eventgrid_topic.this[each.value.sub.topic].identity[0].principal_id :
+    azurerm_eventgrid_domain.this[each.value.sub.domain].identity[0].principal_id
+  )
+}
+
+resource "time_sleep" "rbac_propagation" {
+  count = length(local.delivery_role_assignments) > 0 ? 1 : 0
+
+  create_duration = "60s"
+
+  depends_on = [azurerm_role_assignment.delivery]
+}
+
 resource "azurerm_eventgrid_event_subscription" "this" {
   for_each = local.scoped_subscriptions
+
+  depends_on = [time_sleep.rbac_propagation]
 
   scope = each.value.resolved_scope
 
@@ -400,6 +440,8 @@ resource "azurerm_eventgrid_event_subscription" "this" {
 
 resource "azurerm_eventgrid_system_topic_event_subscription" "this" {
   for_each = local.system_topic_subscriptions
+
+  depends_on = [time_sleep.rbac_propagation]
 
   resource_group_name = local.rg_name
   system_topic        = azurerm_eventgrid_system_topic.this[each.value.system_topic].name

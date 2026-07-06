@@ -1,3 +1,8 @@
+output "delivery_role_assignment_ids" {
+  description = "Map of subscription/index composite key to the delivery role assignment id the module created for it."
+  value       = { for k, v in azurerm_role_assignment.delivery : k => v.id }
+}
+
 output "domain_endpoints" {
   description = "Map of domain name to its publish endpoint."
   value       = { for k, v in azurerm_eventgrid_domain.this : k => v.endpoint }

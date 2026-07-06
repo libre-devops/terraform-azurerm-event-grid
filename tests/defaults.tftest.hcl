@@ -49,6 +49,10 @@ variables {
         storage_account_id          = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-ldo-uks-tst-01/providers/Microsoft.Storage/storageAccounts/saldoukststdeadletter"
         storage_blob_container_name = "deadletter"
       }
+
+      delivery_identity_role_assignments = [
+        { scope = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-ldo-uks-tst-01/providers/Microsoft.Storage/storageAccounts/saldoukststdeadletter", role_definition_name = "Storage Queue Data Message Sender" }
+      ]
     }
 
     "evgs-topic-fanout" = {
@@ -267,4 +271,35 @@ run "input_mapping_on_eventgridschema_is_rejected" {
   }
 
   expect_failures = [var.topics]
+}
+
+# Rendering: the module creates delivery role assignments keyed by subscription/index.
+run "delivery_role_assignments_render" {
+  command = plan
+
+  assert {
+    condition     = azurerm_role_assignment.delivery["evgs-secret-rotation/0"].role_definition_name == "Storage Queue Data Message Sender"
+    error_message = "Delivery role assignments should flatten onto subscription/index composite keys."
+  }
+}
+
+# Validation: delivery role assignments need a module-managed source with an identity.
+run "delivery_role_assignments_without_identity_are_rejected" {
+  command = plan
+
+  variables {
+    event_subscriptions = {
+      "evgs-broken" = {
+        scope = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-ldo-uks-tst-01"
+
+        webhook_endpoint = { url = "https://example.com/hook" }
+
+        delivery_identity_role_assignments = [
+          { scope = "/subscriptions/00000000-0000-0000-0000-000000000000", role_definition_name = "Reader" }
+        ]
+      }
+    }
+  }
+
+  expect_failures = [var.event_subscriptions]
 }

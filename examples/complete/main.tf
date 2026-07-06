@@ -114,8 +114,8 @@ module "event_grid" {
 
   event_subscriptions = {
     # The rotation chassis: near-expiry and expired secrets queue for the rotor to consume.
-    # Managed identity delivery is the private-target pattern (the identity needs the Storage
-    # Queue Data Message Sender role on the account, assigned below).
+    # Managed identity delivery is the private-target pattern; the module grants the roles
+    # below before the subscription exists.
     "evgs-secret-rotation" = {
       system_topic         = local.egst_name
       included_event_types = ["Microsoft.KeyVault.SecretNearExpiry", "Microsoft.KeyVault.SecretExpired"]
@@ -139,6 +139,14 @@ module "event_grid" {
       }
 
       dead_letter_identity = {}
+
+      # The module creates these between the system topic and the subscription: Event Grid
+      # validates delivery permission at subscription-create time, so consumer-side role
+      # assignments arrive too late (proven live).
+      delivery_identity_role_assignments = [
+        { scope = module.storage.ids[local.sa_name], role_definition_name = "Storage Queue Data Message Sender" },
+        { scope = module.storage.ids[local.sa_name], role_definition_name = "Storage Blob Data Contributor" },
+      ]
     }
 
     # Filtered fan-out from the custom topic: only high-severity application events reach the
@@ -175,18 +183,4 @@ module "event_grid" {
       }
     }
   }
-}
-
-# Managed identity delivery: the system topic's identity sends queue messages and writes
-# dead-letter blobs. Role assignments live with the consumer, not the module.
-resource "azurerm_role_assignment" "system_topic_queue_sender" {
-  scope                = module.storage.ids[local.sa_name]
-  role_definition_name = "Storage Queue Data Message Sender"
-  principal_id         = module.event_grid.system_topic_identities[local.egst_name].principal_id
-}
-
-resource "azurerm_role_assignment" "system_topic_deadletter_writer" {
-  scope                = module.storage.ids[local.sa_name]
-  role_definition_name = "Storage Blob Data Contributor"
-  principal_id         = module.event_grid.system_topic_identities[local.egst_name].principal_id
 }

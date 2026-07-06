@@ -119,6 +119,14 @@ variable "event_subscriptions" {
       user_assigned_identity = optional(string)
     }))
 
+    # Role assignments the SOURCE's managed identity needs on the destination, created by the
+    # module BETWEEN the source and the subscription: Event Grid validates delivery permission
+    # at subscription-create time (proven live), so consumer-side assignments arrive too late.
+    delivery_identity_role_assignments = optional(list(object({
+      scope                = string
+      role_definition_name = string
+    })), [])
+
     delivery_properties = optional(list(object({
       header_name  = string
       type         = string
@@ -215,6 +223,18 @@ variable "event_subscriptions" {
       s.dead_letter_identity == null || s.storage_blob_dead_letter_destination != null
     ])
     error_message = "dead_letter_identity needs a storage_blob_dead_letter_destination to authenticate to."
+  }
+
+  validation {
+    condition = alltrue([
+      for s in values(var.event_subscriptions) :
+      length(s.delivery_identity_role_assignments) == 0 || (
+        s.system_topic != null ? try(var.system_topics[s.system_topic].identity, null) != null :
+        s.topic != null ? try(var.topics[s.topic].identity, null) != null :
+        s.domain != null ? try(var.domains[s.domain].identity, null) != null : false
+      )
+    ])
+    error_message = "delivery_identity_role_assignments need a module-managed source (topic, system_topic, or domain) that has an identity block: the assignments are granted to that source's identity."
   }
 }
 
