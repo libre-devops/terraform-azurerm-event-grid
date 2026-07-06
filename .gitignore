@@ -1,0 +1,34 @@
+# Terraform working files
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Plan output
+*.tfplan
+*.plan
+tfplan*
+
+# Local-only overrides and sensitive files (the .example is committed)
+backend_override.tf
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+
+# Engine cache used by some justfiles
+.ldo/
+
+# OS and editor
+.DS_Store
+.idea/
+.vscode/
+*.log
+
+# The examples commit their .terraform.lock.hcl (they are root configs). The module root lock is
+# not used by consumers, so ignore only that one.
+/.terraform.lock.hcl
