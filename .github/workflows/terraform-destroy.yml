@@ -16,6 +16,14 @@ on:
         description: Terraform workspace (environment).
         type: string
         default: dev
+      key-vault-name:
+        description: Vault the runner dances before terraform (soft-fails when absent). The complete stack's is kv-ldo-uks-dev-002, private's is kv-ldo-uks-dev-003.
+        type: string
+        default: kv-ldo-uks-dev-002
+      key-vault-resource-group:
+        description: Resource group of the danced vault.
+        type: string
+        default: rg-ldo-uks-dev-002
 
 permissions:
   id-token: write
@@ -42,4 +50,8 @@ jobs:
           arm-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           firewall-storage-account-name: ${{ secrets.TFSTATE_STORAGE_ACCOUNT }}
           firewall-storage-resource-group: ${{ secrets.TFSTATE_RESOURCE_GROUP }}
+          add-current-ip-to-key-vault-before-tf-run: "true"
+          firewall-key-vault-name: ${{ inputs.key-vault-name }}
+          firewall-key-vault-resource-group: ${{ inputs.key-vault-resource-group }}
+          key-vault-firewall-soft-fail: "true"
           terraform-init-extra-args-json: '["-reconfigure","-upgrade","-backend-config=resource_group_name=${{ secrets.TFSTATE_RESOURCE_GROUP }}","-backend-config=storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }}","-backend-config=container_name=${{ secrets.TFSTATE_BLOB_CONTAINER }}"]'

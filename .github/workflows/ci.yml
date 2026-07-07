@@ -97,6 +97,10 @@ jobs:
           arm-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           firewall-storage-account-name: ${{ secrets.TFSTATE_STORAGE_ACCOUNT }}
           firewall-storage-resource-group: ${{ secrets.TFSTATE_RESOURCE_GROUP }}
+          add-current-ip-to-key-vault-before-tf-run: "true"
+          firewall-key-vault-name: kv-ldo-uks-dev-002
+          firewall-key-vault-resource-group: rg-ldo-uks-dev-002
+          key-vault-firewall-soft-fail: "true"
           terraform-init-extra-args-json: '["-reconfigure","-upgrade","-backend-config=resource_group_name=${{ secrets.TFSTATE_RESOURCE_GROUP }}","-backend-config=storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }}","-backend-config=container_name=${{ secrets.TFSTATE_BLOB_CONTAINER }}"]'
 
       # Runs only if the apply step succeeded, so a failure exits the job rather than chaining
@@ -114,4 +118,8 @@ jobs:
           arm-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           firewall-storage-account-name: ${{ secrets.TFSTATE_STORAGE_ACCOUNT }}
           firewall-storage-resource-group: ${{ secrets.TFSTATE_RESOURCE_GROUP }}
+          add-current-ip-to-key-vault-before-tf-run: "true"
+          firewall-key-vault-name: kv-ldo-uks-dev-002
+          firewall-key-vault-resource-group: rg-ldo-uks-dev-002
+          key-vault-firewall-soft-fail: "true"
           terraform-init-extra-args-json: '["-reconfigure","-upgrade","-backend-config=resource_group_name=${{ secrets.TFSTATE_RESOURCE_GROUP }}","-backend-config=storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }}","-backend-config=container_name=${{ secrets.TFSTATE_BLOB_CONTAINER }}"]'
