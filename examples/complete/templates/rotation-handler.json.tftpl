@@ -1,0 +1,201 @@
+{
+  "description": "Routes Event Grid deliveries: the subscription validation handshake is answered synchronously; real events are accepted with 202 and rotated asynchronously (Event Grid retries anything not acknowledged within 30 seconds).",
+  "type": "If",
+  "expression": {
+    "and": [
+      {
+        "equals": [
+          "@{triggerBody()?[0]?['eventType']}",
+          "Microsoft.EventGrid.SubscriptionValidationEvent"
+        ]
+      }
+    ]
+  },
+  "actions": {
+    "Response_-_Echo_the_validation_code_to_complete_the_handshake": {
+      "description": "Event Grid proves endpoint ownership at subscription-create time by expecting its validation code back.",
+      "type": "Response",
+      "kind": "Http",
+      "inputs": {
+        "statusCode": 200,
+        "body": {
+          "validationResponse": "@{triggerBody()?[0]?['data']?['validationCode']}"
+        }
+      },
+      "runAfter": {}
+    }
+  },
+  "else": {
+    "actions": {
+      "Response_-_Accept_the_event_for_asynchronous_rotation": {
+        "description": "Acknowledge inside Event Grid's 30 second webhook window; rotation continues after the response so slow ARM calls never cause duplicate deliveries.",
+        "type": "Response",
+        "kind": "Http",
+        "inputs": {
+          "statusCode": 202
+        },
+        "runAfter": {}
+      },
+      "HTTP_-_GET_the_expiring_secret_and_its_rotation_tags": {
+        "description": "The event names the vault and secret; the secret's tags carry the rotation contract (Kind, CredentialId, ProviderAddress). Inputs and outputs are secured: this is key material.",
+        "type": "Http",
+        "inputs": {
+          "method": "GET",
+          "uri": "https://@{triggerBody()?[0]?['data']?['VaultName']}.vault.azure.net/secrets/@{triggerBody()?[0]?['data']?['ObjectName']}?api-version=@{parameters('vault_api_version')}",
+          "authentication": {
+            "type": "ManagedServiceIdentity",
+            "audience": "https://vault.azure.net"
+          },
+          "retryPolicy": {
+            "type": "exponential",
+            "count": 4,
+            "interval": "PT10S",
+            "maximumInterval": "PT1M"
+          }
+        },
+        "runtimeConfiguration": {
+          "secureData": {
+            "properties": ["inputs", "outputs"]
+          }
+        },
+        "runAfter": {
+          "Response_-_Accept_the_event_for_asynchronous_rotation": ["Succeeded"]
+        }
+      },
+      "Switch_-_Route_by_the_credential_kind_tag": {
+        "description": "The rotation contract generalises by the Kind tag: each case knows how to regenerate its credential type. Unknown kinds terminate the run as failed so monitoring sees them.",
+        "type": "Switch",
+        "expression": "@{body('HTTP_-_GET_the_expiring_secret_and_its_rotation_tags')?['tags']?['Kind']}",
+        "cases": {
+          "Rotate_an_Azure_storage_account_key": {
+            "case": "AzureStorageAccountKey",
+            "actions": {
+              "Try_-_Regenerate_the_inactive_key_and_store_the_new_version": {
+                "description": "Try block: regenerate whichever key is NOT current per the CredentialId tag, then store it as the new secret version with a fresh expiry. The catch below runs only if every retry fails.",
+                "type": "Scope",
+                "actions": {
+                  "HTTP_-_POST_regenerateKey_for_the_inactive_key": {
+                    "description": "Control-plane regenerate of the inactive key: storage accounts carry two keys precisely so rotation is zero downtime. Secured: the response contains both keys.",
+                    "type": "Http",
+                    "inputs": {
+                      "method": "POST",
+                      "uri": "https://management.azure.com@{body('HTTP_-_GET_the_expiring_secret_and_its_rotation_tags')?['tags']?['ProviderAddress']}/regenerateKey?api-version=@{parameters('storage_api_version')}",
+                      "body": {
+                        "keyName": "@{if(equals(body('HTTP_-_GET_the_expiring_secret_and_its_rotation_tags')?['tags']?['CredentialId'], 'key1'), 'key2', 'key1')}"
+                      },
+                      "authentication": {
+                        "type": "ManagedServiceIdentity",
+                        "audience": "https://management.azure.com"
+                      },
+                      "retryPolicy": {
+                        "type": "exponential",
+                        "count": 4,
+                        "interval": "PT10S",
+                        "maximumInterval": "PT1M"
+                      }
+                    },
+                    "runtimeConfiguration": {
+                      "secureData": {
+                        "properties": ["inputs", "outputs"]
+                      }
+                    },
+                    "runAfter": {}
+                  },
+                  "Filter_-_Select_the_regenerated_key_from_the_response": {
+                    "description": "regenerateKey returns both keys; keep the one just regenerated. Secured: key material.",
+                    "type": "Query",
+                    "inputs": {
+                      "from": "@body('HTTP_-_POST_regenerateKey_for_the_inactive_key')?['keys']",
+                      "where": "@equals(item()?['keyName'], if(equals(body('HTTP_-_GET_the_expiring_secret_and_its_rotation_tags')?['tags']?['CredentialId'], 'key1'), 'key2', 'key1'))"
+                    },
+                    "runtimeConfiguration": {
+                      "secureData": {
+                        "properties": ["inputs", "outputs"]
+                      }
+                    },
+                    "runAfter": {
+                      "HTTP_-_POST_regenerateKey_for_the_inactive_key": ["Succeeded"]
+                    }
+                  },
+                  "HTTP_-_PUT_the_new_secret_version_with_a_fresh_expiry": {
+                    "description": "Consumers read the key from Key Vault, so storing the new version IS the cutover. The expiry restarts the clock (near-expiry fires 30 days before it) and the CredentialId tag flips to the now-active key. Secured: key material.",
+                    "type": "Http",
+                    "inputs": {
+                      "method": "PUT",
+                      "uri": "https://@{triggerBody()?[0]?['data']?['VaultName']}.vault.azure.net/secrets/@{triggerBody()?[0]?['data']?['ObjectName']}?api-version=@{parameters('vault_api_version')}",
+                      "body": {
+                        "value": "@{first(body('Filter_-_Select_the_regenerated_key_from_the_response'))?['value']}",
+                        "attributes": {
+                          "exp": "@{div(sub(ticks(addDays(utcNow(), parameters('rotation_validity_days'))), ticks('1970-01-01T00:00:00Z')), 10000000)}"
+                        },
+                        "tags": {
+                          "Kind": "AzureStorageAccountKey",
+                          "CredentialId": "@{if(equals(body('HTTP_-_GET_the_expiring_secret_and_its_rotation_tags')?['tags']?['CredentialId'], 'key1'), 'key2', 'key1')}",
+                          "ProviderAddress": "@{body('HTTP_-_GET_the_expiring_secret_and_its_rotation_tags')?['tags']?['ProviderAddress']}",
+                          "RotatedBy": "${workflow_name}"
+                        }
+                      },
+                      "authentication": {
+                        "type": "ManagedServiceIdentity",
+                        "audience": "https://vault.azure.net"
+                      },
+                      "retryPolicy": {
+                        "type": "exponential",
+                        "count": 4,
+                        "interval": "PT10S",
+                        "maximumInterval": "PT1M"
+                      }
+                    },
+                    "runtimeConfiguration": {
+                      "secureData": {
+                        "properties": ["inputs", "outputs"]
+                      }
+                    },
+                    "runAfter": {
+                      "Filter_-_Select_the_regenerated_key_from_the_response": ["Succeeded"]
+                    }
+                  }
+                },
+                "runAfter": {}
+              },
+              "Catch_-_Terminate_as_failed_so_monitoring_sees_the_broken_rotation": {
+                "description": "A rotation that silently fails leaves a credential racing its expiry: the run must show failed for the RunsFailed alert to fire.",
+                "type": "Terminate",
+                "inputs": {
+                  "runStatus": "Failed",
+                  "runError": {
+                    "code": "RotationFailed",
+                    "message": "The storage key rotation failed after retries; the secret was NOT updated. Investigate before the current credential expires."
+                  }
+                },
+                "runAfter": {
+                  "Try_-_Regenerate_the_inactive_key_and_store_the_new_version": ["Failed", "TimedOut"]
+                }
+              }
+            }
+          }
+        },
+        "default": {
+          "actions": {
+            "Terminate_-_Unknown_credential_kind": {
+              "description": "A secret without a recognised Kind tag reached the rotor: refuse loudly rather than guess.",
+              "type": "Terminate",
+              "inputs": {
+                "runStatus": "Failed",
+                "runError": {
+                  "code": "UnknownCredentialKind",
+                  "message": "The secret's Kind tag names no rotation case. Add a Switch case for it or fix the tag."
+                }
+              },
+              "runAfter": {}
+            }
+          }
+        },
+        "runAfter": {
+          "HTTP_-_GET_the_expiring_secret_and_its_rotation_tags": ["Succeeded"]
+        }
+      }
+    }
+  },
+  "runAfter": {}
+}

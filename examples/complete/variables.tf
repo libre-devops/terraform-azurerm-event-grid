@@ -29,8 +29,26 @@ variable "regions" {
   }
 }
 
+variable "rotation_validity_days" {
+  description = "Validity stamped on each rotated secret version. Near-expiry fires 30 days before expiry, so the rotation cadence is this minus 30."
+  type        = number
+  default     = 60
+}
+
 variable "short" {
   description = "Infix: short product code used in resource names."
   type        = string
   default     = "ldo"
+}
+
+variable "storage_api_version" {
+  description = "ARM API version for the storage regenerateKey call the rotor makes."
+  type        = string
+  default     = "2023-01-01"
+}
+
+variable "vault_api_version" {
+  description = "Key Vault data-plane API version for the rotor's secret reads and writes."
+  type        = string
+  default     = "7.4"
 }

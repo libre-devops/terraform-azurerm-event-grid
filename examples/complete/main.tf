@@ -1,11 +1,12 @@
 locals {
-  location  = lookup(var.regions, var.loc, "uksouth")
-  rg_name   = "rg-${var.short}-${var.loc}-${terraform.workspace}-002"
-  kv_name   = "kv-${var.short}-${var.loc}-${terraform.workspace}-002"
-  sa_name   = "sa${var.short}${var.loc}${terraform.workspace}evt002"
-  evgt_name = "evgt-${var.short}-${var.loc}-${terraform.workspace}-002"
-  egst_name = "egst-${var.short}-${var.loc}-${terraform.workspace}-002"
-  evgd_name = "evgd-${var.short}-${var.loc}-${terraform.workspace}-002"
+  location   = lookup(var.regions, var.loc, "uksouth")
+  rg_name    = "rg-${var.short}-${var.loc}-${terraform.workspace}-002"
+  kv_name    = "kv-${var.short}-${var.loc}-${terraform.workspace}-002"
+  sa_name    = "sa${var.short}${var.loc}${terraform.workspace}evt002"
+  evgt_name  = "evgt-${var.short}-${var.loc}-${terraform.workspace}-002"
+  egst_name  = "egst-${var.short}-${var.loc}-${terraform.workspace}-002"
+  evgd_name  = "evgd-${var.short}-${var.loc}-${terraform.workspace}-002"
+  logic_name = "logic-${var.short}-${var.loc}-${terraform.workspace}-002"
 }
 
 data "azurerm_client_config" "current" {}
@@ -44,6 +45,15 @@ module "key_vault" {
   key_vaults = {
     (local.kv_name) = {
       purge_protection_enabled = false
+
+      # PUBLIC TIER POSTURE: the Consumption rotor writes the new secret version from Logic
+      # Apps' shared outbound IPs, which cannot sanely be allow-listed (the standard bans
+      # allow-listing the regional ranges), so this vault stays network-open and RBAC-gated.
+      # Locked-down vaults belong to the private tier (Standard logic app over a private
+      # endpoint, see the standards doc).
+      network_acls = {
+        default_action = "Allow"
+      }
     }
   }
 }
@@ -72,6 +82,86 @@ resource "azurerm_storage_container" "deadletter" {
   storage_account_id    = module.storage.ids[local.sa_name]
   name                  = "deadletter"
   container_access_type = "private"
+}
+
+
+# ------------------------------------------------------------------------------------------------
+# The rotor: a Consumption workflow receiving the near-expiry event straight from Event Grid.
+# It answers the subscription validation handshake in-workflow, accepts real events with 202
+# inside Event Grid's 30 second webhook window, reads the rotation contract from the secret's
+# tags, regenerates the INACTIVE storage key, and stores it as the new secret version with a
+# fresh expiry. Key-touching actions secure their inputs and outputs so run history never shows
+# key material.
+# ------------------------------------------------------------------------------------------------
+
+module "logic_app_workflow" {
+  source  = "libre-devops/logic-app-workflow/azurerm"
+  version = "~> 4.0"
+
+  resource_group_id = module.rg.ids[local.rg_name]
+  location          = local.location
+  tags              = module.tags.tags
+
+  workflows = {
+    (local.logic_name) = {
+      title = "Event Grid - Rotate the inactive storage key when a Key Vault secret nears expiry"
+
+      parameters = {
+        rotation_validity_days = {
+          type        = "Int"
+          value       = tostring(var.rotation_validity_days)
+          description = "Validity stamped on each new secret version; near-expiry fires 30 days before it, so the cadence is this minus 30."
+        }
+        storage_api_version = {
+          type        = "String"
+          value       = var.storage_api_version
+          description = "ARM API version for the regenerateKey call."
+        }
+        vault_api_version = {
+          type        = "String"
+          value       = var.vault_api_version
+          description = "Key Vault data-plane API version for secret reads and writes."
+        }
+      }
+    }
+  }
+}
+
+resource "azurerm_logic_app_trigger_http_request" "rotation_events" {
+  name         = "When_Event_Grid_delivers_a_Key_Vault_event"
+  logic_app_id = module.logic_app_workflow.ids[local.logic_name]
+
+  schema = jsonencode({
+    type  = "array"
+    items = { type = "object" }
+  })
+
+  method = "POST"
+}
+
+resource "azurerm_logic_app_action_custom" "rotation_handler" {
+  name         = "Condition_-_Is_this_the_subscription_validation_handshake"
+  logic_app_id = module.logic_app_workflow.ids[local.logic_name]
+
+  body = templatefile("${path.module}/templates/rotation-handler.json.tftpl", {
+    workflow_name = local.logic_name
+  })
+
+  depends_on = [azurerm_logic_app_trigger_http_request.rotation_events]
+}
+
+# Runtime permissions: regenerate keys on the storage account, write secret versions to the
+# vault. Neither gates the Event Grid handshake, only rotation runs.
+resource "azurerm_role_assignment" "rotor_key_operator" {
+  scope                = module.storage.ids[local.sa_name]
+  role_definition_name = "Storage Account Key Operator Service Role"
+  principal_id         = module.logic_app_workflow.identities[local.logic_name].principal_id
+}
+
+resource "azurerm_role_assignment" "rotor_secrets_officer" {
+  scope                = module.key_vault.ids[local.kv_name]
+  role_definition_name = "Key Vault Secrets Officer"
+  principal_id         = module.logic_app_workflow.identities[local.logic_name].principal_id
 }
 
 # Complete call: the full surface. The system topic is the vault's event feed and its
@@ -113,10 +203,37 @@ module "event_grid" {
   }
 
   event_subscriptions = {
-    # The rotation chassis: near-expiry and expired secrets queue for the rotor to consume.
-    # Managed identity delivery is the private-target pattern; the module grants the roles
-    # below before the subscription exists.
+    # The rotor path: near-expiry and expired secrets go straight to the workflow's HTTP
+    # trigger. Event Grid validates the endpoint at subscription-create time by calling the
+    # handshake, so the workflow content must exist first (the module-level depends_on below).
     "evgs-secret-rotation" = {
+      system_topic         = local.egst_name
+      included_event_types = ["Microsoft.KeyVault.SecretNearExpiry", "Microsoft.KeyVault.SecretExpired"]
+
+      webhook_endpoint = {
+        url = azurerm_logic_app_trigger_http_request.rotation_events.callback_url
+      }
+
+      retry_policy = {
+        max_delivery_attempts = 10
+        event_time_to_live    = 1440
+      }
+
+      storage_blob_dead_letter_destination = {
+        storage_account_id          = module.storage.ids[local.sa_name]
+        storage_blob_container_name = azurerm_storage_container.deadletter.name
+      }
+
+      dead_letter_identity = {}
+
+      delivery_identity_role_assignments = [
+        { scope = module.storage.ids[local.sa_name], role_definition_name = "Storage Blob Data Contributor" },
+      ]
+    }
+
+    # The audit trail: the same events also land on the queue with managed identity delivery,
+    # the private-target pattern the private example locks down fully.
+    "evgs-rotation-audit-trail" = {
       system_topic         = local.egst_name
       included_event_types = ["Microsoft.KeyVault.SecretNearExpiry", "Microsoft.KeyVault.SecretExpired"]
 
@@ -183,4 +300,8 @@ module "event_grid" {
       }
     }
   }
+
+  # Event Grid executes the rotor's handshake when creating the webhook subscription, so the
+  # workflow's content (trigger AND handler action) must be deployed first.
+  depends_on = [azurerm_logic_app_action_custom.rotation_handler]
 }
