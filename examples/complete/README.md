@@ -258,11 +258,10 @@ module "event_grid" {
         storage_blob_container_name = azurerm_storage_container.deadletter.name
       }
 
+      # Dead-lettering here rides the Blob Contributor grant on the audit subscription below:
+      # both subscriptions share this system topic's identity, and Azure refuses a duplicate
+      # (principal, role, scope) role assignment, so a shared source gets each grant exactly once.
       dead_letter_identity = {}
-
-      delivery_identity_role_assignments = [
-        { scope = module.storage.ids[local.sa_name], role_definition_name = "Storage Blob Data Contributor" },
-      ]
     }
 
     # The audit trail: the same events also land on the queue with managed identity delivery,

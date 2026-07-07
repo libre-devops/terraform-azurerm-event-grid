@@ -134,6 +134,10 @@ variable "event_subscriptions" {
     # Role assignments the SOURCE's managed identity needs on the destination, created by the
     # module BETWEEN the source and the subscription: Event Grid validates delivery permission
     # at subscription-create time (proven live), so consumer-side assignments arrive too late.
+    # Grant each distinct (scope, role) pair ONCE per source across all its subscriptions:
+    # subscriptions on the same source share its identity, and Azure refuses a duplicate
+    # (principal, role, scope) assignment (RoleAssignmentExists; near-simultaneous creates can
+    # race past the check and mask the problem, so it surfaces non-deterministically).
     delivery_identity_role_assignments = optional(list(object({
       scope                = string
       role_definition_name = string
