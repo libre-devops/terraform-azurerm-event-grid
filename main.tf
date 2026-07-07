@@ -154,6 +154,36 @@ resource "azurerm_eventgrid_domain" "this" {
   }
 }
 
+
+# The azurerm provider exposes no TLS control for Event Grid, and the service DEFAULTS TO
+# TLS 1.0 (verified live): this shim patches minimumTlsVersionAllowed the azapi way, per the
+# estate rule of azapi only where azurerm cannot.
+resource "azapi_update_resource" "topic_tls" {
+  for_each = var.topics
+
+  type        = "Microsoft.EventGrid/topics@2025-02-15"
+  resource_id = azurerm_eventgrid_topic.this[each.key].id
+
+  body = {
+    properties = {
+      minimumTlsVersionAllowed = each.value.minimum_tls_version
+    }
+  }
+}
+
+resource "azapi_update_resource" "domain_tls" {
+  for_each = var.domains
+
+  type        = "Microsoft.EventGrid/domains@2025-02-15"
+  resource_id = azurerm_eventgrid_domain.this[each.key].id
+
+  body = {
+    properties = {
+      minimumTlsVersionAllowed = each.value.minimum_tls_version
+    }
+  }
+}
+
 resource "azurerm_eventgrid_domain_topic" "this" {
   for_each = local.domain_topics
 

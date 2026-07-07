@@ -47,6 +47,9 @@ four maps with the awkwardness handled:
   Dynamic-with-source.
 - **Entra ID first**: custom topics and domains default `local_auth_enabled = false`, so access
   keys are off and publishers use the EventGrid Data Sender role.
+- **TLS 1.2 by default, shimmed**: the service defaults to TLS 1.0 and azurerm exposes no TLS
+  control at all (verified live), so the module patches `minimumTlsVersionAllowed` through an
+  `azapi_update_resource`, per the estate rule of azapi only where azurerm cannot.
 
 The resource group is passed by id and parsed. Deferred by design: Event Grid namespaces (the
 MQTT/pull tier) and partner topics are separate surfaces for separate modules if they earn one.

@@ -10,6 +10,7 @@ variable "domains" {
 
     input_schema                  = optional(string, "EventGridSchema")
     local_auth_enabled            = optional(bool, false)
+    minimum_tls_version           = optional(string, "1.2")
     public_network_access_enabled = optional(bool, true)
 
     auto_create_topic_with_first_subscription = optional(bool, true)
@@ -32,6 +33,11 @@ variable "domains" {
   validation {
     condition     = alltrue([for d in values(var.domains) : contains(["CloudEventSchemaV1_0", "CustomEventSchema", "EventGridSchema"], d.input_schema)])
     error_message = "input_schema must be EventGridSchema, CloudEventSchemaV1_0, or CustomEventSchema."
+  }
+
+  validation {
+    condition     = alltrue([for d in values(var.domains) : contains(["1.0", "1.1", "1.2"], d.minimum_tls_version)])
+    error_message = "minimum_tls_version must be 1.0, 1.1, or 1.2 (the service DEFAULTS to 1.0, hence the 1.2 default here)."
   }
 }
 
@@ -292,6 +298,7 @@ variable "topics" {
 
     input_schema                  = optional(string, "EventGridSchema")
     local_auth_enabled            = optional(bool, false)
+    minimum_tls_version           = optional(string, "1.2")
     public_network_access_enabled = optional(bool, true)
 
     inbound_ip_rules = optional(list(object({
@@ -324,6 +331,11 @@ variable "topics" {
   validation {
     condition     = alltrue([for t in values(var.topics) : contains(["CloudEventSchemaV1_0", "CustomEventSchema", "EventGridSchema"], t.input_schema)])
     error_message = "input_schema must be EventGridSchema, CloudEventSchemaV1_0, or CustomEventSchema."
+  }
+
+  validation {
+    condition     = alltrue([for t in values(var.topics) : contains(["1.0", "1.1", "1.2"], t.minimum_tls_version)])
+    error_message = "minimum_tls_version must be 1.0, 1.1, or 1.2 (the service DEFAULTS to 1.0, hence the 1.2 default here)."
   }
 
   validation {

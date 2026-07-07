@@ -3,6 +3,7 @@
 #   terraform init -backend=false && terraform test
 
 mock_provider "azurerm" {}
+mock_provider "azapi" {}
 
 variables {
   resource_group_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-ldo-uks-tst-01"
@@ -105,6 +106,11 @@ run "sensible_defaults" {
   assert {
     condition     = azurerm_eventgrid_topic.this["evgt-ldo-uks-tst-01"].input_schema == "EventGridSchema"
     error_message = "Topics should default to the EventGridSchema input schema."
+  }
+
+  assert {
+    condition     = azapi_update_resource.topic_tls["evgt-ldo-uks-tst-01"].body.properties.minimumTlsVersionAllowed == "1.2"
+    error_message = "The TLS shim should default topics to 1.2: the service itself defaults to 1.0 and azurerm cannot set it."
   }
 
   assert {
@@ -302,4 +308,19 @@ run "delivery_role_assignments_without_identity_are_rejected" {
   }
 
   expect_failures = [var.event_subscriptions]
+}
+
+# Validation: the TLS floor takes only real TLS versions.
+run "bad_tls_version_is_rejected" {
+  command = plan
+
+  variables {
+    topics = {
+      "evgt-broken" = {
+        minimum_tls_version = "1.3"
+      }
+    }
+  }
+
+  expect_failures = [var.topics]
 }
