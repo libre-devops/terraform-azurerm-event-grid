@@ -1,3 +1,9 @@
+variable "domain_tls_api_version" {
+  description = "ARM API version the domain TLS shim patches through (azurerm exposes no TLS control, see the shim in main.tf). Override when a newer Microsoft.EventGrid GA version ships."
+  type        = string
+  default     = "2025-02-15"
+}
+
 variable "domains" {
   description = <<-EOT
     Event Grid domains keyed by name: multi-tenant ingestion endpoints whose domain topics are
@@ -284,6 +290,12 @@ variable "tags" {
   description = "Tags applied to the topics, system topics, and domains (unless one sets its own)."
   type        = map(string)
   default     = {}
+}
+
+variable "topic_tls_api_version" {
+  description = "ARM API version the topic TLS shim patches through (azurerm exposes no TLS control, see the shim in main.tf). Override when a newer Microsoft.EventGrid GA version ships."
+  type        = string
+  default     = "2025-02-15"
 }
 
 variable "topics" {

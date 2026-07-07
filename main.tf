@@ -161,7 +161,7 @@ resource "azurerm_eventgrid_domain" "this" {
 resource "azapi_update_resource" "topic_tls" {
   for_each = var.topics
 
-  type        = "Microsoft.EventGrid/topics@2025-02-15"
+  type        = "Microsoft.EventGrid/topics@${var.topic_tls_api_version}"
   resource_id = azurerm_eventgrid_topic.this[each.key].id
 
   body = {
@@ -174,7 +174,7 @@ resource "azapi_update_resource" "topic_tls" {
 resource "azapi_update_resource" "domain_tls" {
   for_each = var.domains
 
-  type        = "Microsoft.EventGrid/domains@2025-02-15"
+  type        = "Microsoft.EventGrid/domains@${var.domain_tls_api_version}"
   resource_id = azurerm_eventgrid_domain.this[each.key].id
 
   body = {
