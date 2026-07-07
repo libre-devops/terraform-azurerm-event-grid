@@ -34,14 +34,6 @@ module "rg" {
   resource_groups = [{ name = local.rg_name, location = local.location, tags = module.tags.tags }]
 }
 
-# The Key Vault dance: whoever runs the apply (CI runner or a workstation) allow-lists their own
-# egress IP on the vault's deny-by-default ACL, keeping data-plane operations (seeding rotation
-# probe secrets) possible without opening the vault.
-module "get_ip" {
-  source  = "libre-devops/get-ip-address/external"
-  version = "~> 4.0"
-}
-
 module "network" {
   source  = "libre-devops/network/azurerm"
   version = "~> 4.0"
@@ -76,10 +68,6 @@ module "key_vault" {
   key_vaults = {
     (local.kv_name) = {
       purge_protection_enabled = false
-
-      network_acls = {
-        ip_rules = ["${module.get_ip.public_ip_address}/32"]
-      }
     }
   }
 }
