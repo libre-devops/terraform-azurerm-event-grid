@@ -23,4 +23,14 @@
 #       This module only deploys the resource group. Network rules and private networking are
 #       configured by the consuming stack; use the Libre DevOps private-endpoint module for PEs.
 
-misconfigurations: []
+misconfigurations:
+  - id: AVD-AZU-0013
+    paths:
+      - "examples/complete/.terraform/modules/key_vault/main.tf"
+    statement: >-
+      Deliberate public-tier posture: the complete example's Consumption rotor writes rotated
+      secrets from Logic Apps' shared outbound IPs, which cannot sanely be allow-listed (the
+      Libre DevOps Logic App standard forbids allow-listing the regional ranges), so this one
+      vault is network-open and RBAC-gated. The private example (and the standard's private
+      tier, Standard logic apps over private endpoints) is the pattern for vaults that must
+      deny by default; the vault in examples/private does.

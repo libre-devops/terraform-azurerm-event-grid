@@ -109,3 +109,9 @@ the topic disables public network access outright, while the vault and storage k
 public endpoints alongside their private ones (the CI-operable both-worlds posture), and
 delivery lands on the deny-by-default storage account via the system topic's resource instance
 rule plus managed identity.
+
+## Security scan exceptions
+
+| Id | Where | Justification |
+|:--|:--|:--|
+| AVD-AZU-0013 | `examples/complete` vault | The Consumption rotor writes rotated secrets from Logic Apps' shared outbound IPs, which must not be allow-listed per the Logic App standard, so the public-tier example vault is network-open and RBAC-gated. The private example demonstrates the deny-by-default vault posture. |
