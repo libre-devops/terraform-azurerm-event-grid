@@ -170,24 +170,24 @@ module "event_grid" {
   }
 }
 
-# Inbound privacy for the custom topic: private DNS zone, VNet link, and the private endpoint.
-resource "azurerm_private_dns_zone" "eventgrid" {
-  resource_group_name = local.rg_name
-  tags                = module.tags.tags
+# Inbound privacy for the custom topic: the privatelink zone and VNet link from the
+# private-dns-zone module, then the private endpoint.
+module "private_dns" {
+  source  = "libre-devops/private-dns-zone/azurerm"
+  version = "~> 4.0"
 
-  name = "privatelink.eventgrid.azure.net"
+  resource_group_id = module.rg.ids[local.rg_name]
+  tags              = module.tags.tags
 
-  # resource_group_name is a plain string, so the graph edge to the rg must be explicit.
-  depends_on = [module.rg]
-}
-
-resource "azurerm_private_dns_zone_virtual_network_link" "eventgrid" {
-  resource_group_name = local.rg_name
-  tags                = module.tags.tags
-
-  name                  = "link-${local.vnet_name}"
-  private_dns_zone_name = azurerm_private_dns_zone.eventgrid.name
-  virtual_network_id    = module.network.vnet_id
+  private_dns_zones = {
+    "privatelink.eventgrid.azure.net" = {
+      vnet_links = {
+        "link-${local.vnet_name}" = {
+          virtual_network_id = module.network.vnet_id
+        }
+      }
+    }
+  }
 }
 
 module "private_endpoint" {
@@ -208,7 +208,7 @@ module "private_endpoint" {
       }
 
       private_dns_zone_group = {
-        private_dns_zone_ids = [azurerm_private_dns_zone.eventgrid.id]
+        private_dns_zone_ids = [module.private_dns.private_dns_zone_ids["privatelink.eventgrid.azure.net"]]
       }
     }
   }
