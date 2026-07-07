@@ -28,6 +28,25 @@ stack then always destroys it.
 
 [![Terraform Registry](https://img.shields.io/badge/registry-libre--devops-7B42BC?logo=terraform&logoColor=white)](https://registry.terraform.io/namespaces/libre-devops)
 
+## Running the rotation live
+
+With the stack deployed, `./Seed-RotationTest.ps1` stores the storage account's current active
+key as a secret version expiring inside Key Vault's fixed 30 day near-expiry window, tagged with
+the rotation contract (`Kind`, `CredentialId`, `ProviderAddress`). Key Vault raises
+`SecretNearExpiry` within minutes, Event Grid delivers it to the rotor workflow, and the rotor:
+
+1. regenerates the INACTIVE key (`key1`/`key2` alternation, so the active key never breaks),
+2. writes it back as a new secret version with the expiry restarted to `rotation_validity_days`,
+   `CredentialId` flipped to the now-active key, and `RotatedBy`/`RotatedAt` stamped,
+3. disables the rotated-out version, so anything pinned to it gets a hard 403 instead of a key
+   that quietly dies at expiry.
+
+Verify with `az keyvault secret show` (new version, flipped tags), the key hashes on the storage
+account (the inactive one changed, the active one untouched), and the workflow run history. The
+script is re-runnable: each pass carries the current `CredentialId` forward and rotates the
+other key. The caller needs vault secrets data-plane rights and storage key list rights; the
+vault is network-open by design here (public tier), so no firewall dance is needed.
+
 <!-- BEGIN_TF_DOCS -->
 ## Example configuration
 

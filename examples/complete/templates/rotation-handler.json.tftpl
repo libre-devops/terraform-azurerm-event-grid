@@ -118,7 +118,7 @@
                     }
                   },
                   "HTTP_-_PUT_the_new_secret_version_with_a_fresh_expiry": {
-                    "description": "Consumers read the key from Key Vault, so storing the new version IS the cutover. The expiry restarts the clock (near-expiry fires 30 days before it) and the CredentialId tag flips to the now-active key. Secured: key material.",
+                    "description": "Consumers read the key from Key Vault, so storing the new version IS the cutover. The expiry restarts the clock (near-expiry fires 30 days before it), the CredentialId tag flips to the now-active key, and RotatedAt records the rotation moment alongside RotatedBy. Secured: key material.",
                     "type": "Http",
                     "inputs": {
                       "method": "PUT",
@@ -132,7 +132,8 @@
                           "Kind": "AzureStorageAccountKey",
                           "CredentialId": "@{if(equals(body('HTTP_-_GET_the_expiring_secret_and_its_rotation_tags')?['tags']?['CredentialId'], 'key1'), 'key2', 'key1')}",
                           "ProviderAddress": "@{body('HTTP_-_GET_the_expiring_secret_and_its_rotation_tags')?['tags']?['ProviderAddress']}",
-                          "RotatedBy": "${workflow_name}"
+                          "RotatedBy": "${workflow_name}",
+                          "RotatedAt": "@{utcNow()}"
                         }
                       },
                       "authentication": {
@@ -154,6 +155,37 @@
                     "runAfter": {
                       "Filter_-_Select_the_regenerated_key_from_the_response": ["Succeeded"]
                     }
+                  },
+                  "HTTP_-_PATCH_the_rotated-out_version_disabled": {
+                    "description": "The version that raised the near-expiry event (named in the event payload) is now superseded: disabling it makes the cutover hard, so anything still pinned to the old version gets a clear 403 instead of a key that quietly stops working at expiry.",
+                    "type": "Http",
+                    "inputs": {
+                      "method": "PATCH",
+                      "uri": "https://@{triggerBody()?[0]?['data']?['VaultName']}.vault.azure.net/secrets/@{triggerBody()?[0]?['data']?['ObjectName']}/@{triggerBody()?[0]?['data']?['Version']}?api-version=@{parameters('vault_api_version')}",
+                      "body": {
+                        "attributes": {
+                          "enabled": false
+                        }
+                      },
+                      "authentication": {
+                        "type": "ManagedServiceIdentity",
+                        "audience": "https://vault.azure.net"
+                      },
+                      "retryPolicy": {
+                        "type": "exponential",
+                        "count": 4,
+                        "interval": "PT10S",
+                        "maximumInterval": "PT1M"
+                      }
+                    },
+                    "runtimeConfiguration": {
+                      "secureData": {
+                        "properties": ["inputs", "outputs"]
+                      }
+                    },
+                    "runAfter": {
+                      "HTTP_-_PUT_the_new_secret_version_with_a_fresh_expiry": ["Succeeded"]
+                    }
                   }
                 },
                 "runAfter": {}
@@ -165,7 +197,7 @@
                   "runStatus": "Failed",
                   "runError": {
                     "code": "RotationFailed",
-                    "message": "The storage key rotation failed after retries; the secret was NOT updated. Investigate before the current credential expires."
+                    "message": "The rotation did not complete cleanly. Check the failed action in the run trace: if the regenerate or write-back failed the secret was NOT updated (investigate before the credential expires); if only the disable of the rotated-out version failed, the new secret version is live but the old one is still enabled."
                   }
                 },
                 "runAfter": {
