@@ -9,7 +9,13 @@
 #   - Only waive a finding you have a real, defensible reason to waive. HIGH/CRITICAL is otherwise
 #     merge-blocking (see the Libre DevOps Terraform standard); a waiver is a deliberate, reviewed
 #     decision, never a way to quiet a finding you should fix.
-#   - Prefer scoping with paths so the waiver only applies where intended.
+#   - Prefer scoping with paths so the waiver only applies where intended. For findings raised
+#     inside a downloaded module, Trivy reports the path as the module SOURCE ADDRESS plus the
+#     path relative to the scan target (for example
+#     libre-devops/keyvault/azurerm/examples/complete/.terraform/modules/key_vault/main.tf from a
+#     repo-root scan, but libre-devops/keyvault/azurerm/.terraform/modules/key_vault/main.tf when
+#     the stack folder itself is scanned), so literal repo paths never match: scope those with a
+#     doublestar glob on the module-local tail, as below.
 #   - Where the finding is out of this module's scope, point the justification at the Libre DevOps
 #     module that does address it (for example the private-endpoint module).
 #
@@ -26,11 +32,13 @@
 misconfigurations:
   - id: AVD-AZU-0013
     paths:
-      - "examples/complete/.terraform/modules/key_vault/main.tf"
+      - "**/.terraform/modules/key_vault/main.tf"
     statement: >-
       Deliberate public-tier posture: the complete example's Consumption rotor writes rotated
       secrets from Logic Apps' shared outbound IPs, which cannot sanely be allow-listed (the
       Libre DevOps Logic App standard forbids allow-listing the regional ranges), so this one
       vault is network-open and RBAC-gated. The private example (and the standard's private
       tier, Standard logic apps over private endpoints) is the pattern for vaults that must
-      deny by default; the vault in examples/private does.
+      deny by default; the vault in examples/private does (its downloaded key_vault module
+      falls under this glob too, but it keeps the module's deny-by-default and raises no
+      finding, so nothing is masked there today).
