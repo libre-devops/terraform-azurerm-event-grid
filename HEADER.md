@@ -100,7 +100,9 @@ The `examples/minimal` stack is one custom topic delivering to a storage queue;
 `examples/complete` is the credential-rotation chassis: a Key Vault system topic whose
 near-expiry events queue for a rotor with managed identity delivery, explicit retries, and
 dead-lettering, alongside a filtered custom-topic fan-out and a domain with domain topics.
-`examples/private` is the private tier: a custom topic with public network access disabled
-behind a private endpoint (with its privatelink DNS zone), and delivery onto a storage account
-that denies public access via the system topic's resource instance rule plus managed identity,
-no public opening anywhere in the delivery path.
+`examples/private` is the private tier: private endpoints (with their privatelink DNS zones,
+auto-resolved by subresource) on the custom topic, the vault, and both storage subresources;
+the topic disables public network access outright, while the vault and storage keep firewalled
+public endpoints alongside their private ones (the CI-operable both-worlds posture), and
+delivery lands on the deny-by-default storage account via the system topic's resource instance
+rule plus managed identity.

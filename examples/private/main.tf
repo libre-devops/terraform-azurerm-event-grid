@@ -170,8 +170,8 @@ module "event_grid" {
   }
 }
 
-# Inbound privacy for the custom topic: the privatelink zone and VNet link from the
-# private-dns-zone module, then the private endpoint.
+# The privatelink zones for every service in the stack, all linked to the vnet. Private
+# consumers resolve through these; the public endpoints stay up (firewalled) for CI operability.
 module "private_dns" {
   source  = "libre-devops/private-dns-zone/azurerm"
   version = "~> 4.0"
@@ -180,16 +180,21 @@ module "private_dns" {
   tags              = module.tags.tags
 
   private_dns_zones = {
-    "privatelink.eventgrid.azure.net" = {
-      vnet_links = {
-        "link-${local.vnet_name}" = {
-          virtual_network_id = module.network.vnet_id
-        }
-      }
+    "privatelink.eventgrid.azure.net"    = {}
+    "privatelink.vaultcore.azure.net"    = {}
+    "privatelink.queue.core.windows.net" = {}
+    "privatelink.blob.core.windows.net"  = {}
+  }
+
+  default_vnet_links = {
+    "link-${local.vnet_name}" = {
+      virtual_network_id = module.network.vnet_id
     }
   }
 }
 
+# Private endpoints for every service: the topic's inbound publish path plus the vault and both
+# storage subresources, DNS zone groups auto-resolved by subresource name.
 module "private_endpoint" {
   source  = "libre-devops/private-endpoint/azurerm"
   version = "~> 4.0"
@@ -198,17 +203,51 @@ module "private_endpoint" {
   location          = local.location
   tags              = module.tags.tags
 
+  private_dns_zone_ids = {
+    topic = module.private_dns.private_dns_zone_ids["privatelink.eventgrid.azure.net"]
+    vault = module.private_dns.private_dns_zone_ids["privatelink.vaultcore.azure.net"]
+    queue = module.private_dns.private_dns_zone_ids["privatelink.queue.core.windows.net"]
+    blob  = module.private_dns.private_dns_zone_ids["privatelink.blob.core.windows.net"]
+  }
+
   private_endpoints = {
     topic = {
-      subnet_id = module.network.subnet_ids["snet-pep-${local.vnet_name}"]
+      subnet_id           = module.network.subnet_ids["snet-pep-${local.vnet_name}"]
+      auto_dns_zone_group = true
 
       private_service_connection = {
         private_connection_resource_id = module.event_grid.topic_ids[local.evgt_name]
         subresource_names              = ["topic"]
       }
+    }
 
-      private_dns_zone_group = {
-        private_dns_zone_ids = [module.private_dns.private_dns_zone_ids["privatelink.eventgrid.azure.net"]]
+    vault = {
+      subnet_id           = module.network.subnet_ids["snet-pep-${local.vnet_name}"]
+      auto_dns_zone_group = true
+
+      private_service_connection = {
+        private_connection_resource_id = module.key_vault.ids[local.kv_name]
+        subresource_names              = ["vault"]
+      }
+    }
+
+    storage_queue = {
+      subnet_id           = module.network.subnet_ids["snet-pep-${local.vnet_name}"]
+      auto_dns_zone_group = true
+
+      private_service_connection = {
+        private_connection_resource_id = module.storage.ids[local.sa_name]
+        subresource_names              = ["queue"]
+      }
+    }
+
+    storage_blob = {
+      subnet_id           = module.network.subnet_ids["snet-pep-${local.vnet_name}"]
+      auto_dns_zone_group = true
+
+      private_service_connection = {
+        private_connection_resource_id = module.storage.ids[local.sa_name]
+        subresource_names              = ["blob"]
       }
     }
   }
